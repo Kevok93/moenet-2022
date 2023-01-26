@@ -17,11 +17,7 @@ import logging
 
 logging.basicConfig(level=logging.DEBUG)
 
-if len(sys.argv) != 2:
-    print("Error: specify an IP to connect to!")
-    exit(0)
-
-ip = sys.argv[1]
+ip = '10.3.65.2'
 
 NetworkTables.initialize(server=ip)
 
