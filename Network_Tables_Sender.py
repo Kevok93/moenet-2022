@@ -26,3 +26,10 @@ sd = NetworkTables.getTable("SmartDashboard")
 def sfloat(param: str, value: float):
     sd.putNumber(param, value)
     sd.flush()
+
+
+def send_pose(pose):
+    if sd.putNumberArray("pose", pose) == False:
+        print("NOT WORKING")
+    else:
+        NetworkTables.flush()
