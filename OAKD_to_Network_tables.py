@@ -45,26 +45,30 @@ with dai.Device(pipeline) as device:
                                 estimate_tag_pose=True,
                                 tag_size=.1524,
                                 camera_params=oak_d_camera_params)
-        for result in results:
-            #result.tag_id
-            cposet = result.pose_t*39.3701
-            cposet = [i[0] for i in cposet]
-            cposetnames = ['x','y','z']
-            for i in range(3):
-                nts.sfloat(cposetnames[i], cposet[i])
-            
-            #find rotation vector
-            rnames = ['pitch', 'roll', 'yaw']
-            rvals = [0]*3
+        if len(results) == 0:
+            continue
+        results.sort(reverse=True, key = lambda x: x.pose_err)
+        result = results[0]
+        #result.tag_id
+        cposet = result.pose_t*39.3701
+        #x,y,z
+        cposet = [i[0] for i in cposet]
+        
+        #find rotation vector
+        #rnames = ['pitch', 'roll', 'yaw']
+        rvals = [0]*3
 
-            rot = result.pose_R
-            rot = np.linalg.inv(rot)
-            vec = np.array([1,0,0])
-            rvec = np.dot(rot,vec)
+        rot = result.pose_R
+        rot = np.linalg.inv(rot)
+        rotvec = np.array([1,0,0])
+        robvec = np.array(cposet)
+        robvec[2] += 12.0
+        rotvec = np.dot(rot,rotvec)
+        robvec = np.dot(rot,robvec)
 
-            rvals[0] = np.arctan2(rvec[2], rvec[1])
-            rvals[1] = np.arctan2(rvec[1], rvec[0])
-            rvals[2] = np.arctan2(rvec[0], rvec[2])
+        rvals[0] = np.arctan2(rotvec[2], rotvec[1])
+        rvals[1] = np.arctan2(rotvec[1], rotvec[0])
+        rvals[2] = np.arctan2(rotvec[0], rotvec[2])
 
-            for i in range(3):
-                nts.sfloat(rnames[i], rvals[i])
+        svals = cposet+rvals
+        nts.send_pose(svals)
