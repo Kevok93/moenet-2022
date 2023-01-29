@@ -25,7 +25,7 @@ sd = NetworkTables.getTable("SmartDashboard")
 
 def sfloat(param: str, value: float):
     sd.putNumber(param, value)
-    sd.flush()
+    NetworkTables.flush()
 
 
 def send_pose(pose):
