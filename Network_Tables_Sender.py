@@ -15,7 +15,7 @@ from networktables import NetworkTables
 # To see messages from networktables, you must setup logging
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
 
 ip = '10.3.65.2'
 
