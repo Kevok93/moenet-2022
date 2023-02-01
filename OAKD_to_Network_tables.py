@@ -3,9 +3,8 @@ import Network_Tables_Sender as nts
 import cv2
 import depthai as dai
 #Special MOE one
-import quaternion
+#import quaternion
 import moe_apriltags as apriltag
-from time import monotonic
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -42,7 +41,12 @@ def calculate_pose(det: apriltag.Detection):
     translation = result.pose_t[:,0]
 
     rotation_inv = rotation.inv()
+    rinv = np.linalg.inv(result.pose_R)
     translation_inv = rotation.apply(-translation, inverse=True)
+
+    tinv = rinv@translation
+
+    print(translation_inv.as_matrix(), tinv)
 
     return rotation_inv, translation_inv, rotation, translation
 
@@ -83,76 +87,16 @@ with dai.Device(create_pipeline()) as device:
 
         rotation_ts, translation_ts, rotation_cs, translation_cs = calculate_pose(result)
 
-        # rotation = quaternion.from_rotation_matrix(result.pose_R)
-        # buffer.append(quaternion.as_euler_angles(rotation))
         if len(buffer) > 20:
             buffer = buffer[-20:]
         
-        if False:
-            buffer.append(rotation.as_euler('zyx'))
-        else:
-            buffer.append([*translation_ts, *translation_cs])
+        buffer.append([*translation_ts, *translation_cs])
         ax1.cla()
         b = np.array(buffer)
 
-        if False:
-            ax1.set(ylim=(-np.pi, np.pi))
-            ax1.plot(b[:,0], label='roll')
-            ax1.plot(b[:,1], label='yaw')
-            ax1.plot(b[:,2], label='pitch')
-            ax1.legend()
-        else:
-            ax1.set(xlim=(-3,3), ylim=(-3,3))
-            ax1.scatter([0], [0])
-            ax1.plot(b[:,0], b[:,2])
-            ax1.plot(b[:,3], b[:,5])
+        ax1.set(xlim=(-5,5), ylim=(-5,5))
+        ax1.scatter([0], [0])
+        ax1.plot(b[:,0], b[:,2])
+        ax1.plot(b[:,3], b[:,5])
         plt.draw()
-        plt.pause(.01)
-        continue
-
-        print(tuple(f'{x:01.03f}' for x in quaternion.as_euler_angles(rotation)))
-
-        rotation_inv = -rotation
-        # translation_inv = -translation
-        translation_inv = quaternion.rotate_vectors(rotation_inv, (-translation))
-
-        rotation_inv = quaternion.as_euler_angles(rotation_inv)
-
-        # translation_inv[:] = translation_inv[[2,0,1]]
-        svals = list(translation_inv)+list(rotation_inv)
-        # for val in svals:
-        #     print(f'{val:01.03f} ', end='')
-        # print()
-        nts.send_pose(svals)
-        continue
-
-
-        #result.tag_id
-        cposet = result.pose_t #*39.3701
-        #x,y,z
-        cposet = cposet[:, 0]
-        # cposet = [
-        #     cposet[2],cposet[0]+4,cposet[1] 
-        # ]
-        
-        #find rotation vector
-        #rnames = ['pitch', 'roll', 'yaw']
-        rvals = [0]*3
-
-        rot = result.pose_R
-        # rot = np.linalg.inv(rot)
-        rotvec = np.array([1,0,0])
-        robvec = np.array(cposet)
-        robvec[0] += 4.0
-        rotvec = np.dot(rot,rotvec)
-        robvec = np.dot(rot,robvec)
-
-        rvals[0] = np.arctan2(rotvec[2], rotvec[1])
-        rvals[1] = np.arctan2(rotvec[1], rotvec[0])
-        rvals[2] = np.arctan2(rotvec[0], rotvec[2])
-
-        robvec[:] = robvec[[2,0,1]]
-
-        svals = list(robvec)+list(rvals)
-        print(svals)
-        nts.send_pose(svals)
+        plt.pause(.001)
