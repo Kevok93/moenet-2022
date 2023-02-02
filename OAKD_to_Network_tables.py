@@ -40,7 +40,8 @@ def create_pipeline():
 detector = apriltag.Detector(families="tag16h5", nthreads=2)
 
 def calculate_pose(det: apriltag.Detection):
-    rotation = R.from_matrix(result.pose_R)
+    #negate to account for rotation of tag
+    rotation = R.from_matrix(-result.pose_R)
     
     if debug:
         print(result.pose_R)
@@ -110,7 +111,7 @@ with dai.Device(create_pipeline()) as device:
             plt.pause(.001)
         
         #Original frame of reference: x - side to side, y - up and down, z - towards target
-        #New frame of reference: x - towards target, y - side to sidde, z - up and down
+        #New frame of reference: x - towards target, y - side to side, z - up and down
         translation_ts = translation_ts[[2,0,1]]
 
         translation_ts[0] = (-1)**(tag.rot0[result.tag_id])* \
@@ -123,3 +124,32 @@ with dai.Device(create_pipeline()) as device:
 
 
         translation_ts[2] += tag.posvec[result.tag_id][2]
+
+
+        #Rotation details
+        uvecp = [0,0,1] #plane vector
+        uvecn = [0,1,0] #normal vector
+        rotvec = rotation_ts@uvecp
+        rollvec = rotation_ts@uvecn
+
+        #Original frame of reference: x - side to side, y - up and down, z - towards target
+        #New frame of reference: x - towards target, y - side to side, z - up and down
+        rotvec = rotvec[[2,0,1]]
+        rollvec = rollvec[[2,0,1]]
+
+        #All angles given in deg, +- 180
+
+        #yaw - counterclockwise - 0 in line with [1,0,0]
+        yaw = np.arctan2(rotvec[1], rotvec[0])
+
+        #pitch - counterclockwise - 0 in line with [1,0,0]
+        pitch = np.arctan2(rotvec[2], rotvec[0])
+
+        #roll - counterclockwise - 0 in line with [0,0,1]
+        roll = np.arctan2(rollvec[1], rollvec[2])
+
+        #compile angles and turn them into degrees
+        angles = [yaw, pitch, roll]
+        angles = [np.rad2deg(a) for a in angles]
+
+        nts.send_pose([*translation_ts, *angles])
