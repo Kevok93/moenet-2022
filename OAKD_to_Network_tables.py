@@ -41,16 +41,19 @@ detector = apriltag.Detector(families="tag16h5", nthreads=2)
 
 def calculate_pose(det: apriltag.Detection):
     rotation = R.from_matrix(result.pose_R)
-    print(result.pose_R)
+    
+    if debug:
+        print(result.pose_R)
+    
     translation = result.pose_t[:,0]
 
     rotation_inv = rotation.inv()
     rinv = np.linalg.inv(result.pose_R)
     translation_inv = rotation.apply(-translation, inverse=True)
 
-    tinv = rinv@translation
+    tinv = -rinv@translation
 
-    print(translation_inv, tinv)
+    # print(translation_inv, tinv)
 
     return rotation_inv, translation_inv, rotation, translation
 
@@ -106,4 +109,17 @@ with dai.Device(create_pipeline()) as device:
             plt.draw()
             plt.pause(.001)
         
+        #Original frame of reference: x - side to side, y - up and down, z - towards target
+        #New frame of reference: x - towards target, y - side to sidde, z - up and down
+        translation_ts = translation_ts[[2,0,1]]
+
+        translation_ts[0] = (-1)**(tag.rot0[result.tag_id])* \
+                                translation_ts[0] + \
+                                tag.posvec[result.tag_id][0]
         
+        translation_ts[1] = (-1)**(tag.rot0[result.tag_id]^1)* \
+                                translation_ts[1] + \
+                                tag.posvec[result.tag_id][1]
+
+
+        translation_ts[2] += tag.posvec[result.tag_id][2]
