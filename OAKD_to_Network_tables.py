@@ -1,18 +1,22 @@
 import Network_Tables_Sender as nts
+import tag
 
 import cv2
 import depthai as dai
+
 #Special MOE one
-#import quaternion
 import moe_apriltags as apriltag
 import numpy as np
 
 import matplotlib.pyplot as plt
-plt.ion()
 from scipy.spatial.transform import Rotation as R
 
-fig = plt.figure()
-ax1 = fig.add_subplot(1,1,1)
+debug = 1
+
+if debug:
+    plt.ion()
+    fig = plt.figure()
+    ax1 = fig.add_subplot(1,1,1)
 
 
 buffer = []
@@ -25,8 +29,8 @@ def create_pipeline():
     monoout.setStreamName("mono")
 
     monocam = pipeline.createMonoCamera()
-    monocam.setResolution(dai.MonoCameraProperties.SensorResolution.THE_800_P)
-    monocam.setFps(120)
+    monocam.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+    monocam.setFps(60)
     monocam.setBoardSocket(dai.CameraBoardSocket.LEFT)
 
     monocam.out.link(monoout.input)
@@ -46,7 +50,7 @@ def calculate_pose(det: apriltag.Detection):
 
     tinv = rinv@translation
 
-    print(translation_inv.as_matrix(), tinv)
+    print(translation_inv, tinv)
 
     return rotation_inv, translation_inv, rotation, translation
 
@@ -75,28 +79,31 @@ with dai.Device(create_pipeline()) as device:
                                 tag_size=.1524,
                                 camera_params=oak_d_camera_params)
         
-        cv2.imshow('foo', img)
-        if cv2.waitKey(1) == ord('q'):
-            break
-
-        results = [result for result in results if result.tag_id == 1]
+        if debug:
+            cv2.imshow('foo', img)
+            if cv2.waitKey(1) == ord('q'):
+                break
+        
         if len(results) == 0:
             continue
+        
         results.sort(reverse=True, key = lambda x: x.pose_err)
         result: apriltag.Detection = results[0]
 
         rotation_ts, translation_ts, rotation_cs, translation_cs = calculate_pose(result)
-
-        if len(buffer) > 20:
-            buffer = buffer[-20:]
+            
+        if(debug):
+            if len(buffer) > 20:
+                buffer = buffer[-20:]
+            
+            buffer.append([*translation_ts, *translation_cs])
+            b = np.array(buffer)
+            ax1.cla()
+            ax1.set(xlim=(-5,5), ylim=(-5,5))
+            ax1.scatter([0], [0])
+            ax1.plot(b[:,0], b[:,2])
+            ax1.plot(b[:,3], b[:,5])
+            plt.draw()
+            plt.pause(.001)
         
-        buffer.append([*translation_ts, *translation_cs])
-        ax1.cla()
-        b = np.array(buffer)
-
-        ax1.set(xlim=(-5,5), ylim=(-5,5))
-        ax1.scatter([0], [0])
-        ax1.plot(b[:,0], b[:,2])
-        ax1.plot(b[:,3], b[:,5])
-        plt.draw()
-        plt.pause(.001)
+        
