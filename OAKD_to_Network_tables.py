@@ -30,7 +30,7 @@ def create_pipeline():
 
     monocam = pipeline.createMonoCamera()
     monocam.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
-    monocam.setFps(60)
+    monocam.setFps(30)
     monocam.setBoardSocket(dai.CameraBoardSocket.LEFT)
 
     monocam.out.link(monoout.input)
@@ -56,21 +56,21 @@ def calculate_pose(det: apriltag.Detection):
 
     # print(translation_inv, tinv)
 
-    return rotation_inv, translation_inv, rotation, translation
+    return rinv, tinv, rotation, translation
 
 
 with dai.Device(create_pipeline()) as device:
     monoq = device.getOutputQueue(name="mono", maxSize=1, blocking=False)
 
     calibdata = device.readCalibration()
-    intrinsics = calibdata.getDefaultIntrinsics(dai.CameraBoardSocket.LEFT)[0]
+    intrinsics = calibdata.getCameraIntrinsics(dai.CameraBoardSocket.LEFT, destShape=(600,400))
+    print(intrinsics)
     oak_d_camera_params = (
         intrinsics[0][0],
         intrinsics[1][1],
         intrinsics[0][2],
         intrinsics[1][2],
     )
-
 
     while True:
         img = monoq.get().getCvFrame()
@@ -95,7 +95,9 @@ with dai.Device(create_pipeline()) as device:
         result: apriltag.Detection = results[0]
 
         rotation_ts, translation_ts, rotation_cs, translation_cs = calculate_pose(result)
-            
+        
+        print(translation_cs, translation_ts)
+
         if(debug):
             if len(buffer) > 20:
                 buffer = buffer[-20:]
@@ -116,14 +118,14 @@ with dai.Device(create_pipeline()) as device:
 
         translation_ts[0] = (-1)**(tag.rot0[result.tag_id])* \
                                 translation_ts[0] + \
-                                tag.posvec[result.tag_id][0]
+                                tag.tagpos[result.tag_id][0]
         
         translation_ts[1] = (-1)**(tag.rot0[result.tag_id]^1)* \
                                 translation_ts[1] + \
-                                tag.posvec[result.tag_id][1]
+                                tag.tagpos[result.tag_id][1]
 
 
-        translation_ts[2] += tag.posvec[result.tag_id][2]
+        translation_ts[2] += tag.tagpos[result.tag_id][2]
 
 
         #Rotation details
@@ -151,5 +153,6 @@ with dai.Device(create_pipeline()) as device:
         #compile angles and turn them into degrees
         angles = [yaw, pitch, roll]
         angles = [np.rad2deg(a) for a in angles]
+
 
         nts.send_pose([*translation_ts, *angles])
