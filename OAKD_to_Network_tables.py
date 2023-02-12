@@ -8,12 +8,13 @@ import depthai as dai
 import moe_apriltags as apriltag
 import numpy as np
 
-import matplotlib.pyplot as plt
-from scipy.spatial.transform import Rotation as R
+flip = 1
 
 debug = 1
 
 if debug:
+    import matplotlib.pyplot as plt
+    from scipy.spatial.transform import Rotation as R
     plt.ion()
     fig = plt.figure()
     ax1 = fig.add_subplot(1,1,1)
@@ -40,21 +41,14 @@ def create_pipeline():
 detector = apriltag.Detector(families="tag16h5", nthreads=2)
 
 def calculate_pose(det: apriltag.Detection):
-    #negate to account for rotation of tag
-    rotation = R.from_matrix(-result.pose_R)
-    
-    if debug:
-        print(result.pose_R)
-    
     translation = result.pose_t[:,0]
 
-    rotation_inv = rotation.inv()
-    rinv = np.linalg.inv(result.pose_R)
-    translation_inv = rotation.apply(-translation, inverse=True)
+    rotation = result.pose_R
 
-    tinv = -rinv@translation
+    rinv = np.linalg.inv(rotation)
 
-    # print(translation_inv, tinv)
+    #negate -> translation+robotpos = tag 0,0,0 -> robotpos = -translation
+    tinv = rinv@-translation
 
     return rinv, tinv, rotation, translation
 
@@ -96,7 +90,6 @@ with dai.Device(create_pipeline()) as device:
 
         rotation_ts, translation_ts, rotation_cs, translation_cs = calculate_pose(result)
         
-        print(translation_cs, translation_ts)
 
         if(debug):
             if len(buffer) > 20:
@@ -114,30 +107,27 @@ with dai.Device(create_pipeline()) as device:
         
         #Original frame of reference: x - side to side, y - up and down, z - towards target
         #New frame of reference: x - towards target, y - side to side, z - up and down
-        translation_ts = translation_ts[[2,0,1]]
 
-        translation_ts[0] = (-1)**(tag.rot0[result.tag_id])* \
-                                translation_ts[0] + \
-                                tag.tagpos[result.tag_id][0]
+        #based on tags whose z axis is pointing the same way as the field x axis
+        tag2field = np.array([[0,0,1],[-1,0,0],[0,-1,0]])
+
+        #facing wrong way, rotate 180 around current y axis
+        if(tag.rot0[result.tag_id]):
+            tag2field = tag2field@np.array([[-1,0,0],[0,1,0],[0,0,-1]])
         
-        translation_ts[1] = (-1)**(tag.rot0[result.tag_id]^1)* \
-                                translation_ts[1] + \
-                                tag.tagpos[result.tag_id][1]
-
-
-        translation_ts[2] += tag.tagpos[result.tag_id][2]
-
+        translation_fs = tag2field@translation_ts
+        translation_fs += tag.tagpos[result.tag_id]
 
         #Rotation details
         uvecp = [0,0,1] #plane vector
-        uvecn = [0,1,0] #normal vector
-        rotvec = rotation_ts@uvecp
-        rollvec = rotation_ts@uvecn
-
-        #Original frame of reference: x - side to side, y - up and down, z - towards target
-        #New frame of reference: x - towards target, y - side to side, z - up and down
-        rotvec = rotvec[[2,0,1]]
-        rollvec = rollvec[[2,0,1]]
+        uvecn = [0,-1,0] #normal vector
+        
+        #If camera is flipped, the normal vector has to be rotated 180
+        if flip:
+            uvecn = [0,1,0]
+        
+        rotvec = tag2field@(rotation_ts@uvecp)
+        rollvec = tag2field@(rotation_ts@uvecn)
 
         #All angles given in deg, +- 180
 
@@ -154,5 +144,4 @@ with dai.Device(create_pipeline()) as device:
         angles = [yaw, pitch, roll]
         angles = [np.rad2deg(a) for a in angles]
 
-
-        nts.send_pose([*translation_ts, *angles])
+        nts.send_pose([*translation_fs, *angles])
