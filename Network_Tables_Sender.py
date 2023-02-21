@@ -33,3 +33,9 @@ def send_pose(pose):
         print("NOT WORKING")
     else:
         NetworkTables.flush()
+
+def send_detections(detections):
+    if sd.putNumberArray("detections", detections) == False:
+        print("NOT WORKING")
+    else:
+        NetworkTables.flush()
