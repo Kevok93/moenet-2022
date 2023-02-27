@@ -253,13 +253,14 @@ def calculate_pose(det: apriltag.Detection):
     return rinv, tinv, rotation, translation
 
 # 0 - Camera on back for april tag detection, 1 - Camera on front for objet detection
-with [dai.Device(tag_create_pipeline(), dai.DeviceInfo(tagmxid)), dai.Device(obj_create_pipeline(), dai.DeviceInfo(objmxid))] as device:
-    device: dai.Device[2]
-    monoq = device[0].getOutputQueue(name="mono", maxSize=1, blocking=False)
-    xoutDetect = device[1].getOutputQueue(name="detections", maxSize=1, blocking=False)
+with dai.Device(tag_create_pipeline(), dai.DeviceInfo(tagmxid)) as tagdevice, dai.Device(obj_create_pipeline(), dai.DeviceInfo(objmxid)) as objdevice:
+    tagdevice: dai.Device
+    objdevice: dai.Device
+    monoq = tagdevice.getOutputQueue(name="mono", maxSize=1, blocking=False)
+    xoutDetect = objdevice.getOutputQueue(name="detections", maxSize=1, blocking=False)
 
     #April Tag Calibration Data
-    calibdata = device[0].readCalibration()
+    calibdata = tagdevice.readCalibration()
     intrinsics = calibdata.getCameraIntrinsics(dai.CameraBoardSocket.LEFT, destShape=(600,400))
 
     oak_d_camera_params = (
@@ -270,13 +271,17 @@ with [dai.Device(tag_create_pipeline(), dai.DeviceInfo(tagmxid)), dai.Device(obj
     )
     currentcam = 0
     while True:
-        if currentcam == 0:
-            label = device[currentcam].getQueueEvent(["mono"])
-        elif currentcam == 1:
-            label = device[currentcam].getQueueEvent(["detections"])
-
-        # Make sure to use different camera for next run
+        # Change camera viewed every other iteration
         currentcam ^= 1
+        if currentcam == 0:
+            if not monoq.has():
+                continue
+            label = "mono"
+        elif currentcam == 1:
+            if not xoutDetect.has():
+                continue
+            label = "detections"
+
 #        print(label)
 
         if label == "mono":
