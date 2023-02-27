@@ -23,6 +23,9 @@ if debug:
 
 buffer = []
 
+objmxid = ""
+tagmxid = ""
+
 #Creating pipeline
 def create_pipeline():
     # Create pipeline
@@ -121,6 +124,119 @@ def create_pipeline():
 
     return pipeline
 
+#Creating tag pipeline
+def tag_create_pipeline():
+    # Create pipeline
+    pipeline = dai.Pipeline()
+
+    # Define sources and outputs
+    monoLeft = pipeline.create(dai.node.MonoCamera)
+    xOutMono = pipeline.create(dai.node.XLinkOut)
+
+    xOutMono.setStreamName("mono")
+
+
+    monoLeft.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+    monoLeft.setBoardSocket(dai.CameraBoardSocket.LEFT)
+
+    # Linking
+
+    monoLeft.out.link(xOutMono.input)
+
+    return pipeline
+
+#Creating object pipeline
+def obj_create_pipeline():
+    # Create pipeline
+    pipeline = dai.Pipeline()
+
+    # Define sources and outputs
+    camRgb = pipeline.create(dai.node.ColorCamera)
+    spatialDetectionNetwork = pipeline.createYoloSpatialDetectionNetwork()
+    monoLeft = pipeline.create(dai.node.MonoCamera)
+    monoRight = pipeline.create(dai.node.MonoCamera)
+    stereo = pipeline.create(dai.node.StereoDepth)
+    xoutNN = pipeline.create(dai.node.XLinkOut)
+
+    xoutNN.setStreamName("detections")
+
+    # Properties
+    camRgb.setPreviewSize(416, 416)
+    camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
+    camRgb.setInterleaved(False)
+    camRgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
+
+    monoLeft.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+    monoLeft.setBoardSocket(dai.CameraBoardSocket.LEFT)
+    monoRight.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+    monoRight.setBoardSocket(dai.CameraBoardSocket.RIGHT)
+
+    # setting node configs
+    stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
+    # Align depth map to the perspective of RGB camera, on which inference is done
+    stereo.setDepthAlign(dai.CameraBoardSocket.RGB)
+    stereo.setOutputSize(monoLeft.getResolutionWidth(), monoLeft.getResolutionHeight())
+
+    nnBlobPath = str((Path(__file__).parent / Path('./data/moeNetV1.blob')).resolve().absolute())
+    spatialDetectionNetwork.setBlobPath(nnBlobPath)
+    spatialDetectionNetwork.setConfidenceThreshold(0.75)
+    spatialDetectionNetwork.input.setBlocking(False)
+    spatialDetectionNetwork.setBoundingBoxScaleFactor(0.5)
+    spatialDetectionNetwork.setDepthLowerThreshold(100)
+    spatialDetectionNetwork.setDepthUpperThreshold(5000)
+
+    # Yolo specific parameters
+    spatialDetectionNetwork.setNumClasses(3)
+    spatialDetectionNetwork.setCoordinateSize(4)
+    spatialDetectionNetwork.setAnchors([
+        10.0,
+        13.0,
+        16.0,
+        30.0,
+        33.0,
+        23.0,
+        30.0,
+        61.0,
+        62.0,
+        45.0,
+        59.0,
+        119.0,
+        116.0,
+        90.0,
+        156.0,
+        198.0,
+        373.0,
+        326.0])
+    spatialDetectionNetwork.setAnchorMasks({
+                    "side52": [
+                        0,
+                        1,
+                        2
+                    ],
+                    "side26": [
+                        3,
+                        4,
+                        5
+                    ],
+                    "side13": [
+                        6,
+                        7,
+                        8
+                    ]
+                })
+    spatialDetectionNetwork.setIouThreshold(0.5)
+
+    # Linking
+    monoLeft.out.link(stereo.left)
+    monoRight.out.link(stereo.right)
+
+    camRgb.preview.link(spatialDetectionNetwork.input)
+
+    spatialDetectionNetwork.out.link(xoutNN.input)
+
+    stereo.depth.link(spatialDetectionNetwork.inputDepth)
+
+    return pipeline
 
 detector = apriltag.Detector(families="tag16h5", nthreads=2)
 
@@ -136,25 +252,32 @@ def calculate_pose(det: apriltag.Detection):
 
     return rinv, tinv, rotation, translation
 
+# 0 - Camera on back for april tag detection, 1 - Camera on front for objet detection
+with [dai.Device(tag_create_pipeline(), dai.DeviceInfo(tagmxid)), dai.Device(obj_create_pipeline(), dai.DeviceInfo(objmxid))] as device:
+    device: dai.Device[2]
+    monoq = device[0].getOutputQueue(name="mono", maxSize=1, blocking=False)
+    xoutDetect = device[1].getOutputQueue(name="detections", maxSize=1, blocking=False)
 
-with dai.Device(create_pipeline()) as device:
-    device: dai.Device
-    monoq = device.getOutputQueue(name="mono", maxSize=1, blocking=False)
-    xoutDetect = device.getOutputQueue(name="detections", maxSize=1, blocking=False)
-
-    calibdata = device.readCalibration()
+    #April Tag Calibration Data
+    calibdata = device[0].readCalibration()
     intrinsics = calibdata.getCameraIntrinsics(dai.CameraBoardSocket.LEFT, destShape=(600,400))
-    print(intrinsics)
+
     oak_d_camera_params = (
         intrinsics[0][0],
         intrinsics[1][1],
         intrinsics[0][2],
         intrinsics[1][2],
     )
-
+    currentcam = 0
     while True:
-        label = device.getQueueEvent(["mono", "detections"])
-        print(label)
+        if currentcam == 0:
+            label = device[currentcam].getQueueEvent(["mono"])
+        elif currentcam == 1:
+            label = device[currentcam].getQueueEvent(["detections"])
+
+        # Make sure to use different camera for next run
+        currentcam ^= 1
+#        print(label)
 
         if label == "mono":
             img = monoq.get().getCvFrame()
