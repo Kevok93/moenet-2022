@@ -1,13 +1,18 @@
 from pathlib import Path
 import Network_Tables_Sender as nts
 import tag
-
+import fnmatch
+import os
+import time
+import shelve
+import cv2
 import depthai as dai
-
+from multiprocessing import Process, Queue
 #Special MOE one
 import pupil_apriltags
 import moe_apriltags as apriltag
 import numpy as np
+import sys
 
 flip = 1
 
@@ -157,11 +162,17 @@ def obj_create_pipeline():
     monoRight = pipeline.create(dai.node.MonoCamera)
     stereo = pipeline.create(dai.node.StereoDepth)
     xoutNN = pipeline.create(dai.node.XLinkOut)
+    ctrl_in = pipeline.create(dai.node.XLinkIn)
+    ctrl_out = pipeline.create(dai.node.XLinkOut)
 
     xoutNN.setStreamName("detections")
+    ctrl_in.setStreamName("still_in")
+    ctrl_out.setStreamName("still_out")
+
 
     # Properties
     camRgb.setPreviewSize(416, 416)
+    camRgb.setStillSize(640, 640)
     camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
     camRgb.setInterleaved(False)
     camRgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
@@ -208,22 +219,22 @@ def obj_create_pipeline():
         373.0,
         326.0])
     spatialDetectionNetwork.setAnchorMasks({
-                    "side52": [
-                        0,
-                        1,
-                        2
-                    ],
-                    "side26": [
-                        3,
-                        4,
-                        5
-                    ],
-                    "side13": [
-                        6,
-                        7,
-                        8
-                    ]
-                })
+        "side52": [
+            0,
+            1,
+            2
+        ],
+        "side26": [
+            3,
+            4,
+            5
+        ],
+        "side13": [
+            6,
+            7,
+            8
+        ]
+    })
     spatialDetectionNetwork.setIouThreshold(0.5)
 
     # Linking
@@ -231,10 +242,13 @@ def obj_create_pipeline():
     monoRight.out.link(stereo.right)
 
     camRgb.preview.link(spatialDetectionNetwork.input)
+    camRgb.still.link(ctrl_out)
+    ctrl_in.out.link(camRgb.inputControl)
 
     spatialDetectionNetwork.out.link(xoutNN.input)
 
     stereo.depth.link(spatialDetectionNetwork.inputDepth)
+    
 
     return pipeline
 
@@ -251,17 +265,55 @@ def calculate_pose(det: apriltag.Detection):
     tinv = rinv@-translation
 
     return rinv, tinv, rotation, translation
-def main():
+
+def file_saver(path, q: Queue):
+    #if more than 300 files, sleep for ten seconds
+    #q.get()
+
+    while True:
+        img = q.get()
+        path_checker = Path(path)
+        if path_checker.exists() and img is not None:
+            count = len(fnmatch.filter(os.listdir(path), '*.*'))
+            if count < 300:
+                db = shelve.open('data/naming')
+                cv2.imwrite(path+str(db['name']), q.get())
+                db['name'] += 1
+                db.sync()
+                db.close()
+            else:
+                time.sleep(10)
+            
+    
+
+def main(mode = 'obj', mxid = None):
+    # 0 - Camera on back for april tag detection, 1 - Camera on front for objet detection
+    io_proc = None
     try:
-        # 0 - Camera on back for april tag detection, 1 - Camera on front for objet detection
-        with dai.Device(tag_create_pipeline(), dai.DeviceInfo(tagmxid)) as tagdevice, dai.Device(obj_create_pipeline(), dai.DeviceInfo(objmxid)) as objdevice:
-            tagdevice: dai.Device
-            objdevice: dai.Device
-            monoq = tagdevice.getOutputQueue(name="mono", maxSize=1, blocking=False)
-            xoutDetect = objdevice.getOutputQueue(name="detections", maxSize=1, blocking=False)
+        if mode == 'tag':
+            pipeline = tag_create_pipeline()
+        else:
+            pipeline = obj_create_pipeline()
+            io_q = Queue(1)
+            io_proc = Process(
+                target=file_saver,
+                args=('./images', io_q),
+                daemon=True
+            )
+            io_proc.start()
+        
+
+        curr_time = time.monotonic()
+        
+        with dai.Device(pipeline, dai.DeviceInfo(mxid) if mxid is not None else None) as device:
+            device: dai.Device
+            monoq = device.getOutputQueue(name="mono", maxSize=1, blocking=False)
+            xoutDetect = device.getOutputQueue(name="detections", maxSize=1, blocking=False)
+            still_queue = device.getOutputQueue(name="still_out", maxSize=1, blocking=False)
+            ctrl_queue = device.getInputQueue(name='still_in')
 
             #April Tag Calibration Data
-            calibdata = tagdevice.readCalibration()
+            calibdata = device.readCalibration()
             intrinsics = calibdata.getCameraIntrinsics(dai.CameraBoardSocket.LEFT, destShape=(600,400))
 
             oak_d_camera_params = (
@@ -270,18 +322,12 @@ def main():
                 intrinsics[0][2],
                 intrinsics[1][2],
             )
-            currentcam = 0
+            
             while True:
-                # Change camera viewed every other iteration
-                currentcam ^= 1
-                if currentcam == 0:
-                    if not monoq.has():
-                        continue
-                    label = "mono"
-                elif currentcam == 1:
-                    if not xoutDetect.has():
-                        continue
-                    label = "detections"
+                if mode == 'tag':
+                    label = 'mono'
+                else:
+                    label = device.getQueueEvent(['detections', 'still_out'])
 
         #        print(label)
 
@@ -378,8 +424,28 @@ def main():
                         ntData.extend([x,y,z,label])
                         print("\t", {'x':x, 'y': y, 'z': z, 'label': label, 'confidnce': detection.confidence})
                     nts.send_detections(ntData)
+
+                elif label == "still_out":
+                    img = still_queue.get().getCvFrame()
+                    
+
+                if time.monotonic() - curr_time >= 1 and mode != 'tag':
+                    curr_time = time.monotonic()
+                    ctrl = dai.CameraControl()
+                    ctrl.setCaptureStill(True)
+                    ctrl_queue.send(ctrl)
     except Exception as e:
         print(e)
-        main()    
+    finally:
+        if io_proc is not None:
+            io_proc.terminate()
 
-main()
+
+if __name__ == '__main__':
+    mode = sys.argv[1] if len(sys.argv) >= 2 else 'obj'
+    mxid = sys.argv[2] if len(sys.argv) >= 3 else None
+    while True:
+        try:
+            main(mode, mxid)
+        except Exception as e:
+            print(e)
