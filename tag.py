@@ -1,7 +1,8 @@
 import json
 import numpy as np
+from pathlib import Path
 
-tagf = open('tags.json')
+tagf = open(str((Path(__file__).parent / Path('./tags.json')).resolve().absolute()))
 
 data = json.load(tagf)
 

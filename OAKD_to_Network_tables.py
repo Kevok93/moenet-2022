@@ -2,7 +2,6 @@ from pathlib import Path
 import Network_Tables_Sender as nts
 import tag
 
-import cv2
 import depthai as dai
 
 #Special MOE one
@@ -12,7 +11,7 @@ import numpy as np
 
 flip = 1
 
-debug = 1
+debug = False
 
 if debug:
     import matplotlib.pyplot as plt
