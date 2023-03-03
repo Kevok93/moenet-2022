@@ -242,7 +242,7 @@ def obj_create_pipeline():
     monoRight.out.link(stereo.right)
 
     camRgb.preview.link(spatialDetectionNetwork.input)
-    camRgb.still.link(ctrl_out)
+    camRgb.still.link(ctrl_out.input)
     ctrl_in.out.link(camRgb.inputControl)
 
     spatialDetectionNetwork.out.link(xoutNN.input)
@@ -267,22 +267,24 @@ def calculate_pose(det: apriltag.Detection):
     return rinv, tinv, rotation, translation
 
 def file_saver(path, q: Queue):
-    #if more than 300 files, sleep for ten seconds
-    #q.get()
+    path = Path(path)
 
     while True:
         img = q.get()
-        path_checker = Path(path)
-        if path_checker.exists() and img is not None:
-            count = len(fnmatch.filter(os.listdir(path), '*.*'))
-            if count < 300:
-                db = shelve.open('data/naming')
-                cv2.imwrite(path+str(db['name']), q.get())
-                db['name'] += 1
-                db.sync()
-                db.close()
-            else:
-                time.sleep(10)
+        if path.exists() and img is not None:
+            try:
+                count = len(fnmatch.filter(os.listdir(path), '*.*'))
+                if count < 300:
+                    db = shelve.open('data/naming')
+                    cv2.imwrite(str(path / f"{db.setdefault('name', 0)}.png"), img)
+                    db['name'] += 1
+                    db.sync()
+                    db.close()
+                else:
+                    pass
+                    #time.sleep(10)
+            except Exception as e:
+                print(e)
             
     
 
@@ -307,10 +309,12 @@ def main(mode = 'obj', mxid = None):
         
         with dai.Device(pipeline, dai.DeviceInfo(mxid) if mxid is not None else None) as device:
             device: dai.Device
-            monoq = device.getOutputQueue(name="mono", maxSize=1, blocking=False)
-            xoutDetect = device.getOutputQueue(name="detections", maxSize=1, blocking=False)
-            still_queue = device.getOutputQueue(name="still_out", maxSize=1, blocking=False)
-            ctrl_queue = device.getInputQueue(name='still_in')
+            if mode == 'tag':
+                monoq = device.getOutputQueue(name="mono", maxSize=1, blocking=False)
+            else:
+                xoutDetect = device.getOutputQueue(name="detections", maxSize=1, blocking=False)
+                still_queue = device.getOutputQueue(name="still_out", maxSize=1, blocking=False)
+                ctrl_queue = device.getInputQueue(name='still_in')
 
             #April Tag Calibration Data
             calibdata = device.readCalibration()
@@ -328,6 +332,7 @@ def main(mode = 'obj', mxid = None):
                     label = 'mono'
                 else:
                     label = device.getQueueEvent(['detections', 'still_out'])
+                
 
         #        print(label)
 
@@ -427,6 +432,7 @@ def main(mode = 'obj', mxid = None):
 
                 elif label == "still_out":
                     img = still_queue.get().getCvFrame()
+                    io_q.put_nowait(img)
                     
 
                 if time.monotonic() - curr_time >= 1 and mode != 'tag':
@@ -434,6 +440,9 @@ def main(mode = 'obj', mxid = None):
                     ctrl = dai.CameraControl()
                     ctrl.setCaptureStill(True)
                     ctrl_queue.send(ctrl)
+
+    except KeyboardInterrupt:
+        raise
     except Exception as e:
         print(e)
     finally:
@@ -444,6 +453,11 @@ def main(mode = 'obj', mxid = None):
 if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) >= 2 else 'obj'
     mxid = sys.argv[2] if len(sys.argv) >= 3 else None
+    db = shelve.open('data/naming')
+    if 'name' not in db.keys():
+        db['name'] = time.monotonic()
+    db.sync()
+    db.close()
     while True:
         try:
             main(mode, mxid)
