@@ -14,7 +14,7 @@ import moe_apriltags as apriltag
 import numpy as np
 import sys
 
-flip = 1
+flip = 0
 
 debug = False
 
