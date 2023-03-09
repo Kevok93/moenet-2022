@@ -3,8 +3,8 @@ import Network_Tables_Sender as nts
 import tag
 import fnmatch
 import os
+from random import randint
 import time
-import shelve
 import cv2
 import depthai as dai
 from multiprocessing import Process, Queue
@@ -18,6 +18,8 @@ flip = 0
 
 debug = False
 
+small_debug = True
+
 if debug:
     import matplotlib.pyplot as plt
     from scipy.spatial.transform import Rotation as R
@@ -28,8 +30,6 @@ if debug:
 
 buffer = []
 
-objmxid = ""
-tagmxid = ""
 
 #Creating pipeline
 def create_pipeline():
@@ -255,9 +255,9 @@ def obj_create_pipeline():
 detector = apriltag.Detector(families="tag16h5", nthreads=2)
 
 def calculate_pose(det: apriltag.Detection):
-    translation = result.pose_t[:,0]
+    translation = det.pose_t[:,0]
 
-    rotation = result.pose_R
+    rotation = det.pose_R
 
     rinv = np.linalg.inv(rotation)
 
@@ -269,40 +269,39 @@ def calculate_pose(det: apriltag.Detection):
 def file_saver(path, q: Queue):
     path = Path(path)
 
+    current_count = 0
+    session_name = randint(1,1000000000)
     while True:
         img = q.get()
         if path.exists() and img is not None:
             try:
                 count = len(fnmatch.filter(os.listdir(path), '*.*'))
-                if count < 300:
-                    db = shelve.open('data/naming')
-                    cv2.imwrite(str(path / f"{db.setdefault('name', 0)}.png"), img)
-                    db['name'] += 1
-                    db.sync()
-                    db.close()
+                if count < 6000 and current_count < 1200:
+                    current_count += 1
+                    cv2.imwrite(str(path / f"{session_name}_{current_count}.png"), img)
                 else:
                     pass
                     #time.sleep(10)
             except Exception as e:
                 print(e)
-            
-    
+        time.sleep(0.5)    
+
 
 def main(mode = 'obj', mxid = None):
     # 0 - Camera on back for april tag detection, 1 - Camera on front for objet detection
-    io_proc = None
+    # io_proc = None
     try:
         if mode == 'tag':
             pipeline = tag_create_pipeline()
         else:
             pipeline = obj_create_pipeline()
-            io_q = Queue(1)
-            io_proc = Process(
-                target=file_saver,
-                args=('./images', io_q),
-                daemon=True
-            )
-            io_proc.start()
+            # io_q = Queue(1)
+            # io_proc = Process(
+            #     target=file_saver,
+            #     args=('./images', io_q),
+            #     daemon=True
+            # )
+            # io_proc.start()
         
 
         curr_time = time.monotonic()
@@ -313,8 +312,8 @@ def main(mode = 'obj', mxid = None):
                 monoq = device.getOutputQueue(name="mono", maxSize=1, blocking=False)
             else:
                 xoutDetect = device.getOutputQueue(name="detections", maxSize=1, blocking=False)
-                still_queue = device.getOutputQueue(name="still_out", maxSize=1, blocking=False)
-                ctrl_queue = device.getInputQueue(name='still_in')
+                # still_queue = device.getOutputQueue(name="still_out", maxSize=1, blocking=False)
+                # ctrl_queue = device.getInputQueue(name='still_in')
 
             #April Tag Calibration Data
             calibdata = device.readCalibration()
@@ -416,6 +415,9 @@ def main(mode = 'obj', mxid = None):
 
                     nts.send_pose([*translation_fs, *angles])
 
+                    if small_debug:
+                        print("Detected April Tag")
+
                 elif label == "detections":
                     detections: dai.SpatialImgDetections = xoutDetect.get()
 
@@ -430,36 +432,53 @@ def main(mode = 'obj', mxid = None):
                         print("\t", {'x':x, 'y': y, 'z': z, 'label': label, 'confidnce': detection.confidence})
                     nts.send_detections(ntData)
 
-                elif label == "still_out":
-                    img = still_queue.get().getCvFrame()
-                    io_q.put_nowait(img)
+                # elif label == "still_out":
+                #     img = still_queue.get().getCvFrame()
+                #     io_q.put_nowait(img)
                     
 
-                if time.monotonic() - curr_time >= 1 and mode != 'tag':
-                    curr_time = time.monotonic()
-                    ctrl = dai.CameraControl()
-                    ctrl.setCaptureStill(True)
-                    ctrl_queue.send(ctrl)
+                # if time.monotonic() - curr_time >= 1 and mode != 'tag':
+                #     curr_time = time.monotonic()
+                #     ctrl = dai.CameraControl()
+                #     ctrl.setCaptureStill(True)
+                #     ctrl_queue.send(ctrl)
 
     except KeyboardInterrupt:
         raise
     except Exception as e:
         print(e)
-    finally:
-        if io_proc is not None:
-            io_proc.terminate()
+    # finally:
+    #     if io_proc is not None:
+    #         io_proc.terminate()
 
-
+# Hybrid mode - tag first, object detection
 if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) >= 2 else 'obj'
     mxid = sys.argv[2] if len(sys.argv) >= 3 else None
-    db = shelve.open('data/naming')
-    if 'name' not in db.keys():
-        db['name'] = time.monotonic()
-    db.sync()
-    db.close()
+    [mxid1, mxid2] = sys.argv[2:4] if len(sys.argv) >= 4 else None
+
+    tag_detection_on = 0
+
     while True:
         try:
-            main(mode, mxid)
+            if mode == 'hybrid':
+                if not tag_detection_on:
+                    try:
+                        io_proc = Process(
+                            target=main,
+                            args=('tag', mxid1),
+                            daemon=True
+                        )
+                        io_proc.start()
+                        tag_detection_on = 1
+                    except:
+                        tag_detection_on = 0
+                        pass
+                try:
+                    main('obj', mxid2)
+                except:
+                    pass        
+            else:
+                main(mode, mxid)
         except Exception as e:
             print(e)
