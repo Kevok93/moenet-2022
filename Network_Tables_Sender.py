@@ -8,34 +8,36 @@
 # value should be visible to other networktables clients and the robot.
 #
 
-import sys
-import time
-from networktables import NetworkTables
+from networktables import (
+    NetworkTables,
+    NetworkTable,
+    NetworkTableEntry,
+)
 
 # To see messages from networktables, you must setup logging
 import logging
+#logging.basicConfig(level=logging.DEBUG)
 
-# logging.basicConfig(level=logging.DEBUG)
+class NetworkTablesSender:
+    ip: str
+    smart_dashboard: NetworkTable
+    camera_data: NetworkTable
+    camera_debug: NetworkTable
 
-ip = '10.3.65.2'
+    def __init__(self, ip : str):
+        self.ip = ip
+        NetworkTables.initialize(server=ip)
+        self.smart_dashboard = NetworkTables.getTable("SmartDashboard")
+        self.camera_data = NetworkTables.getTable("CameraData")
+        self.camera_debug = NetworkTables.getTable("CameraDebug")
 
-NetworkTables.initialize(server=ip)
-
-sd = NetworkTables.getTable("SmartDashboard")
-
-def sfloat(param: str, value: float):
-    sd.putNumber(param, value)
-    NetworkTables.flush()
-
-
-def send_pose(pose):
-    if sd.putNumberArray("pose", pose) == False:
-        print("NOT WORKING")
-    else:
+    def flush(self):
         NetworkTables.flush()
 
-def send_detections(detections):
-    if sd.putNumberArray("detections", detections) == False:
-        print("NOT WORKING")
-    else:
-        NetworkTables.flush()
+    @staticmethod
+    def init(ip : str):
+        global nts
+        nts = NetworkTablesSender(ip)
+
+
+nts: NetworkTablesSender = None
