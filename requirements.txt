@@ -1,7 +1,7 @@
-networktables
-logging
-opencv-python=4.6.0.66
+pynetworktables
+opencv-python
 depthai
 numpy
 matplotlib
 scipy
+git+https://github.com/pupil-labs/apriltags.git#egg=pupil-apriltags

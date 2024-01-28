@@ -34,10 +34,9 @@ class NetworkTablesSender:
     def flush(self):
         NetworkTables.flush()
 
-    @staticmethod
-    def init(ip : str):
-        global nts
-        nts = NetworkTablesSender(ip)
+def init(ip : str):
+    global nts
+    nts = NetworkTablesSender(ip)
 
 
 nts: NetworkTablesSender = None

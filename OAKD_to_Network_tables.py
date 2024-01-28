@@ -1,14 +1,10 @@
 from pathlib import Path
 
-from Network_Tables_Sender import (
-    nts,
-    NetworkTablesSender
-)
+import Network_Tables_Sender
 import fnmatch
 import os
 from random import randint
 import time
-import cv2
 from multiprocessing import Process, Queue
 import sys
 
@@ -29,7 +25,7 @@ def file_saver(path, q: Queue):
                 count = len(fnmatch.filter(os.listdir(path), '*.*'))
                 if count < 6000 and current_count < 1200:
                     current_count += 1
-                    cv2.imwrite(str(path / f"{session_name}_{current_count}.png"), img)
+                    #cv2.imwrite(str(path / f"{session_name}_{current_count}.png"), img)
                 else:
                     pass
                     #time.sleep(10)
@@ -42,13 +38,17 @@ def main(mode = 'obj', mxid = None):
     # 0 - Camera on back for april tag detection, 1 - Camera on front for objet detection
     # io_proc = None
     try:
-        nts = NetworkTablesSender('10.3.65.2')
+        Network_Tables_Sender.init('127.0.0.1')
         pipeline: Pipeline = None
+        config: dict = {
+            "device_id": mxid
+        }
         if mode == 'obj':
             pipeline = pipelines.object_pipeline.ObjectPipeline()
         if mode == 'tag':
             pipeline = pipelines.apriltag_pipeline.ApriltagPipeline()
-        pipeline.start(mxid)
+            config = pipelines.apriltag_pipeline.default_config() | config
+        pipeline.start(config)
     except KeyboardInterrupt:
         raise
     except Exception as e:
@@ -61,7 +61,7 @@ def main(mode = 'obj', mxid = None):
 if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) >= 2 else 'obj'
     mxid = sys.argv[2] if len(sys.argv) >= 3 else None
-    [mxid1, mxid2] = sys.argv[2:4] if len(sys.argv) >= 4 else None
+    (mxid1, mxid2) = sys.argv[2:4] if len(sys.argv) >= 4 else (None,None)
 
     tag_detection_on = 0
 
