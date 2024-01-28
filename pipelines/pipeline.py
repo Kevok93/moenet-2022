@@ -4,6 +4,11 @@ from abc import ABC, abstractmethod
 class Pipeline(ABC):
     graceful_shutdown: bool = False
     stopped: bool = True
+    
+    last_exception: Exception
+    last_image_ts: float
+    
+    
 
 
     def shutdown(self):
@@ -12,7 +17,7 @@ class Pipeline(ABC):
     def start(self, *args, **kwargs):
         if not self.stopped:
             #cry
-            pass
+            return
         try:
             self.stopped = False
             self.graceful_shutdown = False
